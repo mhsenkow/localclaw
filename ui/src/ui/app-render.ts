@@ -58,6 +58,7 @@ import { renderAgents } from "./views/agents.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
+import { renderCronCalendar } from "./views/cron-calendar.ts";
 import { renderCron } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
@@ -225,6 +226,8 @@ export function renderApp(state: AppViewState) {
                 cronEnabled: state.cronStatus?.enabled ?? null,
                 cronNext,
                 lastChannelsRefresh: state.channelsLastSuccess,
+                client: state.client,
+                ollamaSetup: state.ollamaSetup,
                 onSettingsChange: (next) => state.applySettings(next),
                 onPasswordChange: (next) => (state.password = next),
                 onSessionKeyChange: (next) => {
@@ -240,6 +243,20 @@ export function renderApp(state: AppViewState) {
                 },
                 onConnect: () => state.connect(),
                 onRefresh: () => state.loadOverview(),
+                onOllamaCheck: () => state.handleOllamaCheck(),
+                onOllamaBaseUrlChange: (url) => {
+                  state.ollamaSetup = { ...state.ollamaSetup, baseUrl: url };
+                },
+                onOllamaModelChange: (model) => {
+                  state.ollamaSetup = { ...state.ollamaSetup, model };
+                },
+                onOllamaCloudModelChange: (model) => {
+                  state.ollamaSetup = { ...state.ollamaSetup, cloudModel: model };
+                },
+                onAiModeChange: (mode) => {
+                  state.ollamaSetup = { ...state.ollamaSetup, aiMode: mode };
+                },
+                onOllamaEnable: () => state.handleOllamaEnable(),
               })
             : nothing
         }
@@ -338,6 +355,7 @@ export function renderApp(state: AppViewState) {
                 channelMeta: state.channelsSnapshot?.channelMeta ?? [],
                 runsJobId: state.cronRunsJobId,
                 runs: state.cronRuns,
+                customScheduleOpen: state.cronCustomScheduleOpen,
                 onFormChange: (patch) =>
                   (state.cronForm = normalizeCronFormState({ ...state.cronForm, ...patch })),
                 onRefresh: () => state.loadCron(),
@@ -346,6 +364,22 @@ export function renderApp(state: AppViewState) {
                 onRun: (job) => runCronJob(state, job),
                 onRemove: (job) => removeCronJob(state, job),
                 onLoadRuns: (jobId) => loadCronRuns(state, jobId),
+                onCustomScheduleOpen: () => (state.cronCustomScheduleOpen = true),
+                onCustomScheduleClose: () => (state.cronCustomScheduleOpen = false),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "calendar"
+            ? renderCronCalendar({
+                jobs: state.cronJobs,
+                runs: state.cronRuns,
+                selectedDate: state.calendarSelectedDate,
+                onSelectDate: (date) => {
+                  state.calendarSelectedDate = date;
+                },
+                onRefresh: () => state.loadCron(),
               })
             : nothing
         }

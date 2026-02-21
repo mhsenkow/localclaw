@@ -121,8 +121,18 @@ export class OpenClawApp extends LitElement {
   @state() theme: ThemeMode = this.settings.theme ?? "system";
   @state() themeResolved: ResolvedTheme = "dark";
   @state() hello: GatewayHelloOk | null = null;
+  @state() calendarSelectedDate: string | null = null;
   @state() lastError: string | null = null;
   @state() eventLog: EventLogEntry[] = [];
+  @state() ollamaSetup: import("./views/overview.ts").OllamaSetupState = {
+    status: "unknown",
+    baseUrl: "http://127.0.0.1:11434",
+    model: "",
+    cloudModel: "",
+    aiMode: "orchestrator",
+    errorMessage: null,
+    availableModels: [],
+  };
   private eventLogBuffer: EventLogEntry[] = [];
   private toolStreamSyncTimer: number | null = null;
   private sidebarCloseTimer: number | null = null;
@@ -301,6 +311,7 @@ export class OpenClawApp extends LitElement {
   @state() cronRunsJobId: string | null = null;
   @state() cronRuns: CronRunLogEntry[] = [];
   @state() cronBusy = false;
+  @state() cronCustomScheduleOpen = false;
 
   @state() updateAvailable: import("./types.js").UpdateAvailable | null = null;
 
@@ -437,6 +448,122 @@ export class OpenClawApp extends LitElement {
 
   async loadOverview() {
     await loadOverviewInternal(this as unknown as Parameters<typeof loadOverviewInternal>[0]);
+  }
+
+  async handleOllamaCheck() {
+    if (!this.client) {
+      return;
+    }
+    this.ollamaSetup = { ...this.ollamaSetup, status: "checking", errorMessage: null };
+    try {
+      const baseUrl = this.ollamaSetup.baseUrl || "http://127.0.0.1:11434";
+      const res = await fetch(`${baseUrl}/api/tags`);
+      if (!res.ok) {
+        throw new Error(`Ollama returned ${res.status}`);
+      }
+      const data = (await res.json()) as { models?: Array<{ name?: string }> };
+      const models = (data.models ?? []).map((m) => m.name ?? "").filter(Boolean);
+      const configRes = await this.client.request<{ raw?: string }>("config.get", {});
+      const raw = configRes?.raw ?? "";
+      const hasOllama = raw.includes("ollama");
+      this.ollamaSetup = {
+        ...this.ollamaSetup,
+        status: hasOllama ? "configured" : "not-configured",
+        availableModels: models,
+        model: this.ollamaSetup.model || models[0] || "",
+        errorMessage: null,
+      };
+    } catch {
+      this.ollamaSetup = {
+        ...this.ollamaSetup,
+        status: "error",
+        errorMessage: `Cannot reach Ollama at ${this.ollamaSetup.baseUrl}. Is it running? (ollama serve)`,
+        availableModels: [],
+      };
+    }
+  }
+
+  async handleOllamaEnable() {
+    if (!this.client) {
+      return;
+    }
+    const { aiMode, model, cloudModel, baseUrl } = this.ollamaSetup;
+    const localModel = model.trim();
+    const cloud = cloudModel.trim();
+    const needsLocal = aiMode === "local" || aiMode === "orchestrator";
+    const needsCloud = aiMode === "cloud" || aiMode === "orchestrator";
+    if (needsLocal && !localModel) {
+      return;
+    }
+    if (needsCloud && !cloud) {
+      return;
+    }
+
+    this.ollamaSetup = { ...this.ollamaSetup, status: "saving", errorMessage: null };
+    try {
+      const configRes = await this.client.request<{ raw?: string; hash?: string }>(
+        "config.get",
+        {},
+      );
+      const raw = configRes?.raw ?? "{}";
+      const baseHash = configRes?.hash;
+      if (!baseHash) {
+        throw new Error("Config hash missing; reload and retry.");
+      }
+      const config = JSON.parse(raw);
+
+      if (needsLocal) {
+        if (!config.models) {
+          config.models = {};
+        }
+        if (!config.models.providers) {
+          config.models.providers = {};
+        }
+        config.models.providers.ollama = {
+          apiKey: "ollama-local",
+          baseUrl: baseUrl || "http://127.0.0.1:11434",
+          api: "ollama",
+        };
+      }
+
+      if (!config.agents) {
+        config.agents = {};
+      }
+      if (!config.agents.defaults) {
+        config.agents.defaults = {};
+      }
+      if (!config.agents.defaults.model) {
+        config.agents.defaults.model = {};
+      }
+
+      if (aiMode === "local") {
+        config.agents.defaults.model.primary = `ollama/${localModel}`;
+        delete config.agents.defaults.model.fallbacks;
+      } else if (aiMode === "cloud") {
+        config.agents.defaults.model.primary = cloud;
+        delete config.agents.defaults.model.fallbacks;
+      } else {
+        config.agents.defaults.model.primary = cloud;
+        config.agents.defaults.model.fallbacks = [`ollama/${localModel}`];
+      }
+
+      await this.client.request("config.set", {
+        raw: JSON.stringify(config, null, 2),
+        baseHash,
+      });
+      await this.client.request("config.apply", {});
+      this.ollamaSetup = {
+        ...this.ollamaSetup,
+        status: "configured",
+        errorMessage: null,
+      };
+    } catch {
+      this.ollamaSetup = {
+        ...this.ollamaSetup,
+        status: "error",
+        errorMessage: String(err),
+      };
+    }
   }
 
   async loadCron() {

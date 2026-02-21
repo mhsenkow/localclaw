@@ -18,6 +18,7 @@ export type CronProps = {
   channelMeta?: ChannelUiMetaEntry[];
   runsJobId: string | null;
   runs: CronRunLogEntry[];
+  customScheduleOpen: boolean;
   onFormChange: (patch: Partial<CronFormState>) => void;
   onRefresh: () => void;
   onAdd: () => void;
@@ -25,6 +26,8 @@ export type CronProps = {
   onRun: (job: CronJob) => void;
   onRemove: (job: CronJob) => void;
   onLoadRuns: (jobId: string) => void;
+  onCustomScheduleOpen: () => void;
+  onCustomScheduleClose: () => void;
 };
 
 function buildChannelOptions(props: CronProps): string[] {
@@ -64,6 +67,74 @@ export function renderCron(props: CronProps) {
     props.form.sessionTarget === "isolated" && props.form.payloadKind === "agentTurn";
   const selectedDeliveryMode =
     props.form.deliveryMode === "announce" && !supportsAnnounce ? "none" : props.form.deliveryMode;
+
+  const presets = [
+    {
+      label: "Hourly check-in",
+      name: "hourly-check",
+      schedule: "every" as const,
+      amount: "1",
+      unit: "hours" as const,
+      message: "Quick status update — what's new?",
+    },
+    {
+      label: "Daily summary",
+      name: "daily-summary",
+      schedule: "every" as const,
+      amount: "1",
+      unit: "days" as const,
+      message: "Give me a daily summary of what happened.",
+    },
+    {
+      label: "Every 30 min",
+      name: "30-min-pulse",
+      schedule: "every" as const,
+      amount: "30",
+      unit: "minutes" as const,
+      message: "",
+    },
+    {
+      label: "Custom",
+      name: "",
+      schedule: "custom" as const,
+      amount: "",
+      unit: "minutes" as const,
+      message: "",
+    },
+  ];
+
+  const isCustomMode = !presets.slice(0, 3).some((p) => p.name && p.name === props.form.name);
+
+  const applyPreset = (preset: (typeof presets)[0]) => {
+    if (preset.schedule === "custom") {
+      props.onFormChange({
+        name: "",
+        description: "",
+        scheduleKind: "cron",
+        cronExpr: props.form.cronExpr || "0 9 * * *",
+        cronTz: "",
+        payloadKind: "agentTurn",
+        payloadText: "",
+        enabled: true,
+      });
+      props.onCustomScheduleOpen();
+      return;
+    }
+    props.onFormChange({
+      name: preset.name,
+      scheduleKind: "every",
+      everyAmount: preset.amount,
+      everyUnit: preset.unit,
+      payloadKind: "agentTurn",
+      payloadText: preset.message,
+      sessionTarget: "isolated",
+      deliveryMode: supportsAnnounce ? "announce" : "none",
+      enabled: true,
+    });
+  };
+
+  const schedulePreview = describeSchedule(props.form);
+
   return html`
     <section class="grid grid-cols-2">
       <div class="card">
@@ -95,138 +166,282 @@ export function renderCron(props: CronProps) {
 
       <div class="card">
         <div class="card-title">New Job</div>
-        <div class="card-sub">Create a scheduled wakeup or agent run.</div>
-        <div class="form-grid" style="margin-top: 16px;">
-          <label class="field">
-            <span>Name</span>
-            <input
-              .value=${props.form.name}
-              @input=${(e: Event) =>
-                props.onFormChange({ name: (e.target as HTMLInputElement).value })}
-            />
-          </label>
-          <label class="field">
-            <span>Description</span>
-            <input
-              .value=${props.form.description}
-              @input=${(e: Event) =>
-                props.onFormChange({ description: (e.target as HTMLInputElement).value })}
-            />
-          </label>
-          <label class="field">
-            <span>Agent ID</span>
-            <input
-              .value=${props.form.agentId}
-              @input=${(e: Event) =>
-                props.onFormChange({ agentId: (e.target as HTMLInputElement).value })}
-              placeholder="default"
-            />
-          </label>
-          <label class="field checkbox">
-            <span>Enabled</span>
-            <input
-              type="checkbox"
-              .checked=${props.form.enabled}
-              @change=${(e: Event) =>
-                props.onFormChange({ enabled: (e.target as HTMLInputElement).checked })}
-            />
-          </label>
-          <label class="field">
-            <span>Schedule</span>
-            <select
-              .value=${props.form.scheduleKind}
-              @change=${(e: Event) =>
-                props.onFormChange({
-                  scheduleKind: (e.target as HTMLSelectElement)
-                    .value as CronFormState["scheduleKind"],
-                })}
-            >
-              <option value="every">Every</option>
-              <option value="at">At</option>
-              <option value="cron">Cron</option>
-            </select>
-          </label>
+        <div class="card-sub">Schedule the assistant to run automatically.</div>
+
+        <!-- Quick presets -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 16px;">
+          ${presets.map((preset) => {
+            const active =
+              preset.schedule === "custom"
+                ? isCustomMode
+                : props.form.name === preset.name && !!preset.name;
+            return html`
+                <button
+                  class="btn ${active ? "primary" : ""}"
+                  style="padding: 8px 6px; font-size: 12px; height: auto;"
+                  @click=${() => applyPreset(preset)}
+                >
+                  ${preset.label}
+                </button>
+              `;
+          })}
         </div>
-        ${renderScheduleFields(props)}
-        <div class="form-grid" style="margin-top: 12px;">
-          <label class="field">
-            <span>Session</span>
-            <select
-              .value=${props.form.sessionTarget}
-              @change=${(e: Event) =>
+
+        <!-- Step 1: What -->
+        <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px;">
+            1. What should it do?
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>Job name</span>
+              <input
+                .value=${props.form.name}
+                @input=${(e: Event) =>
+                  props.onFormChange({ name: (e.target as HTMLInputElement).value })}
+                placeholder="e.g. daily-summary"
+              />
+            </label>
+            <label class="field">
+              <span>Type</span>
+              <select
+                .value=${props.form.payloadKind}
+                @change=${(e: Event) =>
+                  props.onFormChange({
+                    payloadKind: (e.target as HTMLSelectElement)
+                      .value as CronFormState["payloadKind"],
+                  })}
+              >
+                <option value="agentTurn">Ask the assistant (prompt)</option>
+                <option value="systemEvent">System event (internal)</option>
+              </select>
+            </label>
+          </div>
+          <label class="field" style="margin-top: 8px;">
+            <span>${props.form.payloadKind === "agentTurn" ? "What to ask" : "System text"}</span>
+            <textarea
+              .value=${props.form.payloadText}
+              @input=${(e: Event) =>
                 props.onFormChange({
-                  sessionTarget: (e.target as HTMLSelectElement)
-                    .value as CronFormState["sessionTarget"],
+                  payloadText: (e.target as HTMLTextAreaElement).value,
                 })}
-            >
-              <option value="main">Main</option>
-              <option value="isolated">Isolated</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Wake mode</span>
-            <select
-              .value=${props.form.wakeMode}
-              @change=${(e: Event) =>
-                props.onFormChange({
-                  wakeMode: (e.target as HTMLSelectElement).value as CronFormState["wakeMode"],
-                })}
-            >
-              <option value="now">Now</option>
-              <option value="next-heartbeat">Next heartbeat</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Payload</span>
-            <select
-              .value=${props.form.payloadKind}
-              @change=${(e: Event) =>
-                props.onFormChange({
-                  payloadKind: (e.target as HTMLSelectElement)
-                    .value as CronFormState["payloadKind"],
-                })}
-            >
-              <option value="systemEvent">System event</option>
-              <option value="agentTurn">Agent turn</option>
-            </select>
-          </label>
-        </div>
-        <label class="field" style="margin-top: 12px;">
-          <span>${props.form.payloadKind === "systemEvent" ? "System text" : "Agent message"}</span>
-          <textarea
-            .value=${props.form.payloadText}
-            @input=${(e: Event) =>
-              props.onFormChange({
-                payloadText: (e.target as HTMLTextAreaElement).value,
-              })}
-            rows="4"
-          ></textarea>
-        </label>
-        <div class="form-grid" style="margin-top: 12px;">
-          <label class="field">
-            <span>Delivery</span>
-            <select
-              .value=${selectedDeliveryMode}
-              @change=${(e: Event) =>
-                props.onFormChange({
-                  deliveryMode: (e.target as HTMLSelectElement)
-                    .value as CronFormState["deliveryMode"],
-                })}
-            >
-              ${
-                supportsAnnounce
-                  ? html`
-                      <option value="announce">Announce summary (default)</option>
-                    `
-                  : nothing
+              rows="3"
+              placeholder=${
+                props.form.payloadKind === "agentTurn"
+                  ? "e.g. Summarize today's news about AI"
+                  : "e.g. scheduled-maintenance"
               }
-              <option value="webhook">Webhook POST</option>
-              <option value="none">None (internal)</option>
-            </select>
+            ></textarea>
           </label>
+        </div>
+
+        <!-- Step 2: When -->
+        <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px;">
+            2. When should it run?
+          </div>
+
           ${
-            props.form.payloadKind === "agentTurn"
+            isCustomMode
               ? html`
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  ${
+                    schedulePreview
+                      ? html`<span style="font-size: 13px; color: var(--text);">${schedulePreview}</span>`
+                      : html`
+                          <span class="muted" style="font-size: 13px">No schedule set yet</span>
+                        `
+                  }
+                  <button class="btn" style="font-size: 12px; padding: 5px 12px; margin-left: auto;"
+                    @click=${() => props.onCustomScheduleOpen()}
+                  >Edit schedule</button>
+                </div>
+              `
+              : html`
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Schedule type</span>
+                    <select
+                      .value=${props.form.scheduleKind}
+                      @change=${(e: Event) =>
+                        props.onFormChange({
+                          scheduleKind: (e.target as HTMLSelectElement)
+                            .value as CronFormState["scheduleKind"],
+                        })}
+                    >
+                      <option value="every">Repeating interval</option>
+                      <option value="at">One-time (specific date/time)</option>
+                      <option value="cron">Advanced (cron expression)</option>
+                    </select>
+                  </label>
+                </div>
+                ${renderScheduleFields(props)}
+              `
+          }
+
+          ${
+            !isCustomMode && schedulePreview
+              ? html`
+                <div style="
+                  margin-top: 10px;
+                  padding: 8px 12px;
+                  background: var(--accent-subtle);
+                  border-radius: var(--radius-md);
+                  font-size: 12px;
+                  color: var(--accent);
+                ">
+                  ${schedulePreview}
+                </div>
+              `
+              : nothing
+          }
+        </div>
+
+        <!-- Step 3: Where (delivery) — only for agent turns -->
+        ${
+          props.form.payloadKind === "agentTurn"
+            ? html`
+              <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
+                <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px;">
+                  3. Where to deliver the result?
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Delivery</span>
+                    <select
+                      .value=${selectedDeliveryMode}
+                      @change=${(e: Event) =>
+                        props.onFormChange({
+                          deliveryMode: (e.target as HTMLSelectElement)
+                            .value as CronFormState["deliveryMode"],
+                        })}
+                    >
+                      ${
+                        supportsAnnounce
+                          ? html`
+                              <option value="announce">Send summary to a channel</option>
+                            `
+                          : nothing
+                      }
+                      <option value="webhook">POST to a webhook URL</option>
+                      <option value="none">Keep internal (no delivery)</option>
+                    </select>
+                  </label>
+                  ${
+                    selectedDeliveryMode !== "none"
+                      ? html`
+                        <label class="field">
+                          <span>${selectedDeliveryMode === "webhook" ? "Webhook URL" : "Channel"}</span>
+                          ${
+                            selectedDeliveryMode === "webhook"
+                              ? html`
+                                <input
+                                  .value=${props.form.deliveryTo}
+                                  @input=${(e: Event) =>
+                                    props.onFormChange({
+                                      deliveryTo: (e.target as HTMLInputElement).value,
+                                    })}
+                                  placeholder="https://example.com/webhook"
+                                />
+                              `
+                              : html`
+                                <select
+                                  .value=${props.form.deliveryChannel || "last"}
+                                  @change=${(e: Event) =>
+                                    props.onFormChange({
+                                      deliveryChannel: (e.target as HTMLSelectElement).value,
+                                    })}
+                                >
+                                  ${channelOptions.map(
+                                    (channel) =>
+                                      html`<option value=${channel}>
+                                        ${resolveChannelLabel(props, channel)}
+                                      </option>`,
+                                  )}
+                                </select>
+                              `
+                          }
+                        </label>
+                        ${
+                          selectedDeliveryMode === "announce"
+                            ? html`
+                              <label class="field">
+                                <span>Send to (phone/chat ID)</span>
+                                <input
+                                  .value=${props.form.deliveryTo}
+                                  @input=${(e: Event) =>
+                                    props.onFormChange({
+                                      deliveryTo: (e.target as HTMLInputElement).value,
+                                    })}
+                                  placeholder="+1555… or chat id"
+                                />
+                              </label>
+                            `
+                            : nothing
+                        }
+                      `
+                      : nothing
+                  }
+                </div>
+              </div>
+            `
+            : nothing
+        }
+
+        <!-- Advanced (collapsed by default) -->
+        <details style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px;">
+          <summary style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); cursor: pointer; user-select: none;">
+            Advanced options
+          </summary>
+          <div class="form-grid" style="margin-top: 10px;">
+            <label class="field">
+              <span>Description</span>
+              <input
+                .value=${props.form.description}
+                @input=${(e: Event) =>
+                  props.onFormChange({ description: (e.target as HTMLInputElement).value })}
+                placeholder="Optional note about this job"
+              />
+            </label>
+            <label class="field">
+              <span>Agent ID</span>
+              <input
+                .value=${props.form.agentId}
+                @input=${(e: Event) =>
+                  props.onFormChange({ agentId: (e.target as HTMLInputElement).value })}
+                placeholder="default"
+              />
+            </label>
+            <label class="field">
+              <span>Session handling</span>
+              <select
+                .value=${props.form.sessionTarget}
+                @change=${(e: Event) =>
+                  props.onFormChange({
+                    sessionTarget: (e.target as HTMLSelectElement)
+                      .value as CronFormState["sessionTarget"],
+                  })}
+              >
+                <option value="isolated">New session each run (isolated)</option>
+                <option value="main">Use main session (shared context)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Timing</span>
+              <select
+                .value=${props.form.wakeMode}
+                @change=${(e: Event) =>
+                  props.onFormChange({
+                    wakeMode: (e.target as HTMLSelectElement).value as CronFormState["wakeMode"],
+                  })}
+              >
+                <option value="now">Run immediately when scheduled</option>
+                <option value="next-heartbeat">Wait for next heartbeat</option>
+              </select>
+            </label>
+            ${
+              props.form.payloadKind === "agentTurn"
+                ? html`
                   <label class="field">
                     <span>Timeout (seconds)</span>
                     <input
@@ -235,71 +450,31 @@ export function renderCron(props: CronProps) {
                         props.onFormChange({
                           timeoutSeconds: (e.target as HTMLInputElement).value,
                         })}
+                      placeholder="300"
                     />
                   </label>
                 `
-              : nothing
-          }
-          ${
-            selectedDeliveryMode !== "none"
-              ? html`
-                  <label class="field">
-                    <span>${selectedDeliveryMode === "webhook" ? "Webhook URL" : "Channel"}</span>
-                    ${
-                      selectedDeliveryMode === "webhook"
-                        ? html`
-                            <input
-                              .value=${props.form.deliveryTo}
-                              @input=${(e: Event) =>
-                                props.onFormChange({
-                                  deliveryTo: (e.target as HTMLInputElement).value,
-                                })}
-                              placeholder="https://example.invalid/cron"
-                            />
-                          `
-                        : html`
-                            <select
-                              .value=${props.form.deliveryChannel || "last"}
-                              @change=${(e: Event) =>
-                                props.onFormChange({
-                                  deliveryChannel: (e.target as HTMLSelectElement).value,
-                                })}
-                            >
-                              ${channelOptions.map(
-                                (channel) =>
-                                  html`<option value=${channel}>
-                                    ${resolveChannelLabel(props, channel)}
-                                  </option>`,
-                              )}
-                            </select>
-                          `
-                    }
-                  </label>
-                  ${
-                    selectedDeliveryMode === "announce"
-                      ? html`
-                          <label class="field">
-                            <span>To</span>
-                            <input
-                              .value=${props.form.deliveryTo}
-                              @input=${(e: Event) =>
-                                props.onFormChange({
-                                  deliveryTo: (e.target as HTMLInputElement).value,
-                                })}
-                              placeholder="+1555… or chat id"
-                            />
-                          </label>
-                        `
-                      : nothing
-                  }
-                `
-              : nothing
-          }
-        </div>
+                : nothing
+            }
+            <label class="field checkbox">
+              <span>Start enabled</span>
+              <input
+                type="checkbox"
+                .checked=${props.form.enabled}
+                @change=${(e: Event) =>
+                  props.onFormChange({ enabled: (e.target as HTMLInputElement).checked })}
+              />
+            </label>
+          </div>
+        </details>
+
         <div class="row" style="margin-top: 14px;">
-          <button class="btn primary" ?disabled=${props.busy} @click=${props.onAdd}>
+          <button class="btn primary" ?disabled=${props.busy || !props.form.name.trim()} @click=${props.onAdd}>
             ${props.busy ? "Saving…" : "Add job"}
           </button>
+          <span class="muted" style="font-size: 12px;">
+            ${!props.form.name.trim() ? "Give it a name to continue" : ""}
+          </span>
         </div>
       </div>
     </section>
@@ -339,15 +514,297 @@ export function renderCron(props: CronProps) {
             `
       }
     </section>
+
+    ${props.customScheduleOpen ? renderScheduleModal(props) : nothing}
   `;
+}
+
+function renderScheduleModal(props: CronProps) {
+  const form = props.form;
+  const preview = describeSchedule(form);
+
+  return html`
+    <div
+      class="exec-approval-overlay"
+      @click=${(e: Event) => {
+        if (e.target === e.currentTarget) {
+          props.onCustomScheduleClose();
+        }
+      }}
+    >
+      <div style="
+        width: min(520px, 95vw);
+        max-height: 90vh;
+        overflow-y: auto;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+        animation: scale-in 0.2s var(--ease-out);
+      ">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--text-strong);">Schedule builder</div>
+            <div class="muted" style="font-size: 12px; margin-top: 2px;">Pick when this job should run.</div>
+          </div>
+          <button class="btn" style="padding: 4px 10px; font-size: 18px; line-height: 1;"
+            @click=${() => props.onCustomScheduleClose()}
+          >&times;</button>
+        </div>
+
+        ${renderCustomScheduleBuilder(props)}
+
+        ${
+          preview
+            ? html`
+              <div style="
+                margin-top: 14px;
+                padding: 10px 14px;
+                background: var(--accent-subtle);
+                border-radius: var(--radius-md);
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--accent);
+                text-align: center;
+              ">
+                ${preview}
+              </div>
+            `
+            : nothing
+        }
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border);">
+          <button class="btn" @click=${() => props.onCustomScheduleClose()}>Cancel</button>
+          <button class="btn primary" @click=${() => props.onCustomScheduleClose()}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+const DAYS_OF_WEEK = [
+  { short: "Sun", value: "0" },
+  { short: "Mon", value: "1" },
+  { short: "Tue", value: "2" },
+  { short: "Wed", value: "3" },
+  { short: "Thu", value: "4" },
+  { short: "Fri", value: "5" },
+  { short: "Sat", value: "6" },
+];
+
+const QUICK_TIMES = ["06:00", "09:00", "12:00", "15:00", "18:00", "21:00"];
+
+function parseCronDays(expr: string): Set<string> {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length < 5 || parts[4] === "*") {
+    return new Set();
+  }
+  return new Set(parts[4].split(","));
+}
+
+function parseCronHourMinute(expr: string): { hour: string; minute: string } {
+  const parts = expr.trim().split(/\s+/);
+  return {
+    minute: parts[0] ?? "0",
+    hour: parts[1] ?? "9",
+  };
+}
+
+function buildCronFromDaysAndTime(selectedDays: Set<string>, hour: string, minute: string): string {
+  const dow =
+    selectedDays.size === 0 || selectedDays.size === 7
+      ? "*"
+      : [...selectedDays].toSorted().join(",");
+  return `${minute} ${hour} * * ${dow}`;
+}
+
+function renderCustomScheduleBuilder(props: CronProps) {
+  const form = props.form;
+
+  const isAtMode = form.scheduleKind === "at";
+  const isEveryMode = form.scheduleKind === "every";
+  const isCronMode = form.scheduleKind === "cron";
+
+  const selectedDays = isCronMode ? parseCronDays(form.cronExpr || "0 9 * * *") : new Set<string>();
+  const { hour, minute } = isCronMode
+    ? parseCronHourMinute(form.cronExpr || "0 9 * * *")
+    : { hour: "9", minute: "0" };
+
+  const toggleDay = (dayValue: string) => {
+    const next = new Set(selectedDays);
+    if (next.has(dayValue)) {
+      next.delete(dayValue);
+    } else {
+      next.add(dayValue);
+    }
+    props.onFormChange({
+      scheduleKind: "cron",
+      cronExpr: buildCronFromDaysAndTime(next, hour, minute),
+    });
+  };
+
+  const setTime = (h: string, m: string) => {
+    props.onFormChange({
+      scheduleKind: "cron",
+      cronExpr: buildCronFromDaysAndTime(selectedDays, h, m),
+    });
+  };
+
+  return html`
+    <!-- Mode tabs -->
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px;">
+      <button
+        class="btn ${isEveryMode ? "primary" : ""}"
+        style="font-size: 12px; padding: 6px;"
+        @click=${() => props.onFormChange({ scheduleKind: "every", everyAmount: "1", everyUnit: "hours" })}
+      >Interval</button>
+      <button
+        class="btn ${isCronMode ? "primary" : ""}"
+        style="font-size: 12px; padding: 6px;"
+        @click=${() => props.onFormChange({ scheduleKind: "cron", cronExpr: form.cronExpr || "0 9 * * *" })}
+      >Days + Time</button>
+      <button
+        class="btn ${isAtMode ? "primary" : ""}"
+        style="font-size: 12px; padding: 6px;"
+        @click=${() => props.onFormChange({ scheduleKind: "at" })}
+      >One-time</button>
+    </div>
+
+    ${isEveryMode ? renderScheduleFields(props) : nothing}
+    ${isAtMode ? renderScheduleFields(props) : nothing}
+
+    ${
+      isCronMode
+        ? html`
+      <!-- Day picker -->
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">Pick days (leave empty for every day)</div>
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;">
+          ${DAYS_OF_WEEK.map(
+            (day) => html`
+              <button
+                class="btn ${selectedDays.has(day.value) ? "primary" : ""}"
+                style="padding: 8px 0; font-size: 12px; font-weight: 600;"
+                @click=${() => toggleDay(day.value)}
+              >
+                ${day.short}
+              </button>
+            `,
+          )}
+        </div>
+        <div style="display: flex; gap: 4px; margin-top: 6px;">
+          <button class="btn" style="font-size: 11px; padding: 3px 8px;"
+            @click=${() => props.onFormChange({ scheduleKind: "cron", cronExpr: buildCronFromDaysAndTime(new Set(["1", "2", "3", "4", "5"]), hour, minute) })}
+          >Weekdays</button>
+          <button class="btn" style="font-size: 11px; padding: 3px 8px;"
+            @click=${() => props.onFormChange({ scheduleKind: "cron", cronExpr: buildCronFromDaysAndTime(new Set(["0", "6"]), hour, minute) })}
+          >Weekends</button>
+          <button class="btn" style="font-size: 11px; padding: 3px 8px;"
+            @click=${() => props.onFormChange({ scheduleKind: "cron", cronExpr: buildCronFromDaysAndTime(new Set(), hour, minute) })}
+          >Every day</button>
+        </div>
+      </div>
+
+      <!-- Time picker -->
+      <div>
+        <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px;">Pick time</div>
+        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 8px;">
+          ${QUICK_TIMES.map((t) => {
+            const [h, m] = t.split(":");
+            const active = hour === h && minute === m;
+            const label =
+              parseInt(h, 10) >= 12
+                ? `${parseInt(h, 10) === 12 ? 12 : parseInt(h, 10) - 12}${m === "00" ? "" : `:${m}`}pm`
+                : `${parseInt(h, 10) === 0 ? 12 : h}${m === "00" ? "" : `:${m}`}am`;
+            return html`
+                <button
+                  class="btn ${active ? "primary" : ""}"
+                  style="font-size: 11px; padding: 6px 0;"
+                  @click=${() => setTime(h, m)}
+                >
+                  ${label}
+                </button>
+              `;
+          })}
+        </div>
+        <div class="form-grid">
+          <label class="field">
+            <span>Hour (0-23)</span>
+            <input
+              type="number" min="0" max="23"
+              .value=${hour}
+              @input=${(e: Event) => setTime((e.target as HTMLInputElement).value, minute)}
+            />
+          </label>
+          <label class="field">
+            <span>Minute (0-59)</span>
+            <input
+              type="number" min="0" max="59"
+              .value=${minute}
+              @input=${(e: Event) => setTime(hour, (e.target as HTMLInputElement).value)}
+            />
+          </label>
+        </div>
+      </div>
+
+      <!-- Raw expression (editable) -->
+      <label class="field" style="margin-top: 10px;">
+        <span>Cron expression (editable)</span>
+        <input
+          .value=${form.cronExpr}
+          @input=${(e: Event) => props.onFormChange({ cronExpr: (e.target as HTMLInputElement).value })}
+          style="font-family: var(--mono); font-size: 13px;"
+        />
+      </label>
+      <label class="field" style="margin-top: 4px;">
+        <span>Timezone</span>
+        <input
+          .value=${form.cronTz}
+          @input=${(e: Event) => props.onFormChange({ cronTz: (e.target as HTMLInputElement).value })}
+          placeholder="America/New_York (optional)"
+        />
+      </label>
+    `
+        : nothing
+    }
+  `;
+}
+
+function describeSchedule(form: CronFormState): string | null {
+  if (form.scheduleKind === "every") {
+    const n = parseInt(form.everyAmount, 10);
+    if (!n || n <= 0) {
+      return null;
+    }
+    const unit =
+      form.everyUnit === "minutes" ? "minute" : form.everyUnit === "hours" ? "hour" : "day";
+    return n === 1 ? `Runs every ${unit}` : `Runs every ${n} ${unit}s`;
+  }
+  if (form.scheduleKind === "at") {
+    if (!form.scheduleAt) {
+      return null;
+    }
+    try {
+      const d = new Date(form.scheduleAt);
+      return `Runs once on ${d.toLocaleDateString()} at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    } catch {
+      return null;
+    }
+  }
+  if (form.scheduleKind === "cron" && form.cronExpr.trim()) {
+    return `Cron: ${form.cronExpr.trim()}${form.cronTz ? ` (${form.cronTz})` : ""}`;
+  }
+  return null;
 }
 
 function renderScheduleFields(props: CronProps) {
   const form = props.form;
   if (form.scheduleKind === "at") {
     return html`
-      <label class="field" style="margin-top: 12px;">
-        <span>Run at</span>
+      <label class="field" style="margin-top: 8px;">
+        <span>Date and time</span>
         <input
           type="datetime-local"
           .value=${form.scheduleAt}
@@ -361,15 +818,18 @@ function renderScheduleFields(props: CronProps) {
   }
   if (form.scheduleKind === "every") {
     return html`
-      <div class="form-grid" style="margin-top: 12px;">
+      <div class="form-grid" style="margin-top: 8px;">
         <label class="field">
-          <span>Every</span>
+          <span>Run every</span>
           <input
+            type="number"
+            min="1"
             .value=${form.everyAmount}
             @input=${(e: Event) =>
               props.onFormChange({
                 everyAmount: (e.target as HTMLInputElement).value,
               })}
+            placeholder="1"
           />
         </label>
         <label class="field">
@@ -390,21 +850,23 @@ function renderScheduleFields(props: CronProps) {
     `;
   }
   return html`
-    <div class="form-grid" style="margin-top: 12px;">
+    <div class="form-grid" style="margin-top: 8px;">
       <label class="field">
-        <span>Expression</span>
+        <span>Cron expression</span>
         <input
           .value=${form.cronExpr}
           @input=${(e: Event) =>
             props.onFormChange({ cronExpr: (e.target as HTMLInputElement).value })}
+          placeholder="0 9 * * 1-5  (weekdays at 9am)"
         />
       </label>
       <label class="field">
-        <span>Timezone (optional)</span>
+        <span>Timezone</span>
         <input
           .value=${form.cronTz}
           @input=${(e: Event) =>
             props.onFormChange({ cronTz: (e.target as HTMLInputElement).value })}
+          placeholder="America/New_York (optional)"
         />
       </label>
     </div>

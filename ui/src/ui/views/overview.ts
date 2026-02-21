@@ -1,9 +1,21 @@
-import { html } from "lit";
+import { html, nothing } from "lit";
 import { t, i18n, type Locale } from "../../i18n/index.ts";
 import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
-import type { GatewayHelloOk } from "../gateway.ts";
+import type { GatewayBrowserClient, GatewayHelloOk } from "../gateway.ts";
 import { formatNextRun } from "../presenter.ts";
 import type { UiSettings } from "../storage.ts";
+
+export type AiMode = "local" | "cloud" | "orchestrator";
+
+export type OllamaSetupState = {
+  status: "unknown" | "checking" | "not-configured" | "configured" | "saving" | "error";
+  baseUrl: string;
+  model: string;
+  cloudModel: string;
+  aiMode: AiMode;
+  errorMessage: string | null;
+  availableModels: string[];
+};
 
 export type OverviewProps = {
   connected: boolean;
@@ -16,11 +28,19 @@ export type OverviewProps = {
   cronEnabled: boolean | null;
   cronNext: number | null;
   lastChannelsRefresh: number | null;
+  client: GatewayBrowserClient | null;
+  ollamaSetup: OllamaSetupState;
   onSettingsChange: (next: UiSettings) => void;
   onPasswordChange: (next: string) => void;
   onSessionKeyChange: (next: string) => void;
   onConnect: () => void;
   onRefresh: () => void;
+  onOllamaCheck: () => void;
+  onOllamaBaseUrlChange: (url: string) => void;
+  onOllamaModelChange: (model: string) => void;
+  onOllamaCloudModelChange: (model: string) => void;
+  onAiModeChange: (mode: AiMode) => void;
+  onOllamaEnable: () => void;
 };
 
 export function renderOverview(props: OverviewProps) {
@@ -291,6 +311,169 @@ export function renderOverview(props: OverviewProps) {
           <div class="note-title">${t("overview.notes.cronTitle")}</div>
           <div class="muted">${t("overview.notes.cronText")}</div>
         </div>
+      </div>
+    </section>
+
+    ${props.connected ? renderOllamaCard(props) : nothing}
+  `;
+}
+
+const MODE_INFO: Record<AiMode, { label: string; desc: string }> = {
+  local: {
+    label: "Purely Local",
+    desc: "All inference stays on your machine via Ollama. Private, free, no cloud calls.",
+  },
+  cloud: {
+    label: "Cloud (Default)",
+    desc: "Uses your configured cloud provider (Anthropic, OpenAI, etc.) as the primary model.",
+  },
+  orchestrator: {
+    label: "Orchestrator",
+    desc: "Cloud primary with local fallback. Fast cloud answers, automatic failover to Ollama when cloud is down or rate-limited.",
+  },
+};
+
+function renderOllamaCard(props: OverviewProps) {
+  const s = props.ollamaSetup;
+
+  const statusBadge = (() => {
+    switch (s.status) {
+      case "configured":
+        return html`
+          <span class="pill" style="background: var(--ok-subtle); color: var(--ok)">Connected</span>
+        `;
+      case "not-configured":
+        return html`
+          <span class="pill" style="background: var(--warn-subtle); color: var(--warn)">Not configured</span>
+        `;
+      case "checking":
+      case "saving":
+        return html`<span class="pill" style="background: var(--accent-subtle); color: var(--accent);">${s.status === "checking" ? "Checking..." : "Saving..."}</span>`;
+      case "error":
+        return html`
+          <span class="pill" style="background: var(--danger-subtle); color: var(--danger)">Error</span>
+        `;
+      default:
+        return html`
+          <span class="pill" style="background: var(--bg-muted); color: var(--muted)">Unknown</span>
+        `;
+    }
+  })();
+
+  const isBusy = s.status === "checking" || s.status === "saving";
+  const needsLocal = s.aiMode === "local" || s.aiMode === "orchestrator";
+  const needsCloud = s.aiMode === "cloud" || s.aiMode === "orchestrator";
+
+  return html`
+    <section class="card" style="margin-top: 18px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="card-title" style="margin: 0;">AI Model Setup</div>
+        ${statusBadge}
+      </div>
+      <div class="card-sub">Choose how your assistant picks models: fully local, cloud, or smart switching between both.</div>
+
+      <!-- Mode selector -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px;">
+        ${(["local", "cloud", "orchestrator"] as AiMode[]).map(
+          (mode) => html`
+            <button
+              class="btn ${s.aiMode === mode ? "primary" : ""}"
+              style="flex-direction: column; align-items: flex-start; padding: 12px; height: auto; text-align: left; gap: 4px;"
+              @click=${() => props.onAiModeChange(mode)}
+              ?disabled=${isBusy}
+            >
+              <strong style="font-size: 13px;">${MODE_INFO[mode].label}</strong>
+              <span style="font-size: 11px; opacity: 0.7; line-height: 1.3;">${MODE_INFO[mode].desc}</span>
+            </button>
+          `,
+        )}
+      </div>
+
+      <!-- Config fields -->
+      <div class="form-grid" style="margin-top: 14px;">
+        ${
+          needsLocal
+            ? html`
+              <label class="field">
+                <span>Ollama URL</span>
+                <input
+                  .value=${s.baseUrl}
+                  @input=${(e: Event) => props.onOllamaBaseUrlChange((e.target as HTMLInputElement).value)}
+                  placeholder="http://127.0.0.1:11434"
+                  ?disabled=${isBusy}
+                />
+              </label>
+              <label class="field">
+                <span>Local Model</span>
+                ${
+                  s.availableModels.length > 0
+                    ? html`
+                      <select
+                        .value=${s.model}
+                        @change=${(e: Event) => props.onOllamaModelChange((e.target as HTMLSelectElement).value)}
+                        ?disabled=${isBusy}
+                      >
+                        ${s.availableModels.map(
+                          (m) => html`<option value=${m} ?selected=${m === s.model}>${m}</option>`,
+                        )}
+                      </select>
+                    `
+                    : html`
+                      <input
+                        .value=${s.model}
+                        @input=${(e: Event) => props.onOllamaModelChange((e.target as HTMLInputElement).value)}
+                        placeholder="llama3.3"
+                        ?disabled=${isBusy}
+                      />
+                    `
+                }
+              </label>
+            `
+            : nothing
+        }
+        ${
+          needsCloud
+            ? html`
+              <label class="field">
+                <span>Cloud Model</span>
+                <input
+                  .value=${s.cloudModel}
+                  @input=${(e: Event) => props.onOllamaCloudModelChange((e.target as HTMLInputElement).value)}
+                  placeholder="anthropic/claude-sonnet-4-20250514"
+                  ?disabled=${isBusy}
+                />
+              </label>
+            `
+            : nothing
+        }
+      </div>
+
+      ${s.errorMessage ? html`<div class="callout danger" style="margin-top: 10px;">${s.errorMessage}</div>` : nothing}
+
+      <div class="row" style="margin-top: 14px; gap: 8px;">
+        ${
+          needsLocal
+            ? html`
+              <button class="btn" @click=${() => props.onOllamaCheck()} ?disabled=${isBusy}>
+                ${s.status === "checking" ? "Checking..." : "Check Ollama"}
+              </button>
+            `
+            : nothing
+        }
+        <button
+          class="btn primary"
+          @click=${() => props.onOllamaEnable()}
+          ?disabled=${isBusy || (needsLocal && !s.model.trim()) || (needsCloud && !s.cloudModel.trim())}
+        >
+          ${s.status === "saving" ? "Saving..." : "Apply"}
+        </button>
+        <a
+          class="session-link"
+          href="https://docs.openclaw.ai/providers/ollama"
+          target="_blank"
+          rel="noreferrer"
+          style="margin-left: auto;"
+        >Docs</a>
       </div>
     </section>
   `;
