@@ -286,6 +286,15 @@ const entries: SubCliEntry[] = [
       mod.registerCompletionCli(program);
     },
   },
+  {
+    name: "voice",
+    description: "Voice cloning and TTS (XTTS) via the xtts-voice skill",
+    hasSubcommands: true,
+    register: async (program) => {
+      const mod = await import("../voice-cli.js");
+      mod.registerVoiceCli(program);
+    },
+  },
 ];
 
 export function getSubCliEntries(): SubCliEntry[] {

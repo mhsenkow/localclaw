@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""
+xtts-say: Local TTS + voice cloning via Coqui XTTS-v2.
+Runs entirely on-device — no server, no cloud.
+
+Usage:
+  xtts-say "Text to speak"
+  xtts-say --clone ~/Desktop/my-voice.wav
+  xtts-say --record ~/Desktop/my-voice.wav
+  xtts-say --no-play -o ~/output.wav "Save to file"
+"""
+
+import argparse
+import os
+import sys
+import subprocess
+import tempfile
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+VENV_PYTHON = SKILL_DIR / ".venv" / "bin" / "python3"
+VOICE_REF = SKILL_DIR / ".voice-ref.wav"
+MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+
+def ensure_venv():
+    if not VENV_PYTHON.exists():
+        print(f"Python venv not found at {VENV_PYTHON}", file=sys.stderr)
+        print(f"Run: python3 -m venv {SKILL_DIR}/.venv && {SKILL_DIR}/.venv/bin/pip install torch torchaudio coqui-tts", file=sys.stderr)
+        sys.exit(1)
+
+
+def record_audio(output_path: str, duration: int = 15):
+    out = Path(output_path).expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        for tool in ["rec", "sox"]:
+            if subprocess.run(["which", tool], capture_output=True).returncode == 0:
+                print(f"Recording {duration}s from microphone with {tool}... (speak now)")
+                subprocess.run([tool, str(out), "trim", "0", str(duration)])
+                print(f"Saved to {out}")
+                return
+        print("Install sox for recording: brew install sox", file=sys.stderr)
+        print("Or record with Voice Memos / QuickTime and export as WAV.", file=sys.stderr)
+        sys.exit(1)
+    else:
+        for tool in ["arecord", "rec"]:
+            if subprocess.run(["which", tool], capture_output=True).returncode == 0:
+                print(f"Recording {duration}s from microphone with {tool}... (speak now)")
+                if tool == "arecord":
+                    subprocess.run([tool, "-d", str(duration), "-f", "cd", str(out)])
+                else:
+                    subprocess.run([tool, str(out), "trim", "0", str(duration)])
+                print(f"Saved to {out}")
+                return
+        print("No recording tool found. Install sox or alsa-utils.", file=sys.stderr)
+        sys.exit(1)
+
+
+def clone_voice(wav_path: str):
+    src = Path(wav_path).expanduser().resolve()
+    if not src.exists():
+        print(f"Voice sample not found: {src}", file=sys.stderr)
+        sys.exit(1)
+    import shutil
+    shutil.copy2(str(src), str(VOICE_REF))
+    print(f"Voice cloned from {src}")
+    print(f"Reference saved to {VOICE_REF}")
+    print("You can now run: xtts-say \"Hello in my voice\"")
+
+
+def synthesize(text: str, output_path: str, language: str, no_play: bool):
+    if not VOICE_REF.exists():
+        print("No cloned voice found. Clone one first:", file=sys.stderr)
+        print(f"  xtts-say --clone ~/Desktop/my-voice.wav", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Loading XTTS model (first run downloads ~1.8GB)...")
+    from TTS.api import TTS
+    tts = TTS(MODEL_NAME, progress_bar=True)
+
+    if hasattr(tts, 'to'):
+        import torch
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        tts = tts.to(device)
+
+    out = Path(output_path).expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Synthesizing: \"{text[:80]}{'...' if len(text) > 80 else ''}\"")
+    tts.tts_to_file(
+        text=text,
+        speaker_wav=str(VOICE_REF),
+        language=language,
+        file_path=str(out),
+    )
+    print(f"Audio saved to {out}")
+
+    if not no_play:
+        play_audio(str(out))
+
+
+def play_audio(path: str):
+    if sys.platform == "darwin":
+        subprocess.run(["afplay", path])
+    elif sys.platform == "linux":
+        for player in ["aplay", "paplay", "play"]:
+            if subprocess.run(["which", player], capture_output=True).returncode == 0:
+                subprocess.run([player, path])
+                return
+        print(f"No audio player found. File saved at {path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Local TTS + voice cloning via XTTS-v2")
+    parser.add_argument("text", nargs="*", help="Text to synthesize")
+    parser.add_argument("--clone", metavar="WAV", help="Clone voice from a WAV sample")
+    parser.add_argument("--record", metavar="WAV", help="Record from microphone to a WAV file")
+    parser.add_argument("--language", default="en", help="Language code (default: en)")
+    parser.add_argument("-o", "--output", help="Output WAV path (default: temp file)")
+    parser.add_argument("--no-play", action="store_true", help="Skip playback")
+    args = parser.parse_args()
+
+    if args.record:
+        record_audio(args.record)
+        return
+
+    if args.clone:
+        clone_voice(args.clone)
+        return
+
+    text = " ".join(args.text).strip()
+    if not text:
+        parser.print_help()
+        sys.exit(1)
+
+    ensure_venv()
+
+    output = args.output or os.path.join(tempfile.gettempdir(), f"xtts-{os.getpid()}.wav")
+    synthesize(text, output, args.language, args.no_play)
+
+
+if __name__ == "__main__":
+    # Re-exec under the venv python if we're not already in it
+    if VENV_PYTHON.exists() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
+        os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), __file__] + sys.argv[1:])
+    main()
