@@ -189,6 +189,111 @@
   color-scheme: light;
 }
 
+/* Retro theme - Terminal / mainframe aesthetic (phosphor green on void black) */
+:root[data-theme="retro"] {
+  --bg: #050505;
+  --bg-accent: #0a0a0a;
+  --bg-elevated: #0f0f0f;
+  --bg-hover: #141414;
+  --bg-muted: #141414;
+
+  --card: #0a0a0a;
+  --card-foreground: #33ff00;
+  --card-highlight: rgba(51, 255, 0, 0.06);
+  --popover: #0a0a0a;
+  --popover-foreground: #33ff00;
+
+  --panel: #050505;
+  --panel-strong: #0f0f0f;
+  --panel-hover: #141414;
+  --chrome: rgba(5, 5, 5, 0.95);
+  --chrome-strong: rgba(5, 5, 5, 0.98);
+
+  --text: #ccff99;
+  --text-strong: #33ff00;
+  --chat-text: #ccff99;
+  --muted: #6b8f5a;
+  --muted-strong: #5a7a4a;
+  --muted-foreground: #6b8f5a;
+
+  --border: #1a2e14;
+  --border-strong: #2a4a1a;
+  --border-hover: #3a6a22;
+  --input: #1a2e14;
+  --ring: #33ff00;
+
+  --accent: #33ff00;
+  --accent-hover: #66ff33;
+  --accent-muted: #28cc00;
+  --accent-subtle: rgba(51, 255, 0, 0.12);
+  --accent-foreground: #050505;
+  --accent-glow: rgba(51, 255, 0, 0.2);
+  --primary: #33ff00;
+  --primary-foreground: #050505;
+
+  --secondary: #0f0f0f;
+  --secondary-foreground: #33ff00;
+  --accent-2: #00ff88;
+  --accent-2-muted: rgba(0, 255, 136, 0.7);
+  --accent-2-subtle: rgba(0, 255, 136, 0.12);
+
+  --ok: #33ff00;
+  --ok-muted: rgba(51, 255, 0, 0.75);
+  --ok-subtle: rgba(51, 255, 0, 0.12);
+  --destructive: #ff3333;
+  --destructive-foreground: #050505;
+  --warn: #ffaa00;
+  --warn-muted: rgba(255, 170, 0, 0.75);
+  --warn-subtle: rgba(255, 170, 0, 0.12);
+  --danger: #ff3333;
+  --danger-muted: rgba(255, 51, 51, 0.75);
+  --danger-subtle: rgba(255, 51, 51, 0.12);
+  --info: #33aaff;
+
+  --focus: rgba(51, 255, 0, 0.2);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
+  --focus-glow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring), 0 0 16px var(--accent-glow);
+
+  --grid-line: rgba(51, 255, 0, 0.06);
+
+  /* Sharp corners - no border radius */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-full: 0;
+  --radius: 0;
+
+  --mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-body: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-sm: 0 1px 0 rgba(51, 255, 0, 0.08);
+  --shadow-md: 0 2px 0 rgba(51, 255, 0, 0.1);
+  --shadow-lg: 0 4px 0 rgba(51, 255, 0, 0.08);
+  --shadow-xl: 0 6px 0 rgba(51, 255, 0, 0.08);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+
+  color-scheme: dark;
+}
+
+/* Optional scanline overlay for retro (enable by adding .retro-scanlines to body or a wrapper) */
+.retro-scanlines::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+}
+
 * {
   box-sizing: border-box;
 }

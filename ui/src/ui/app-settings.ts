@@ -270,7 +270,8 @@ export function applyResolvedTheme(host: SettingsHost, resolved: ResolvedTheme) 
   }
   const root = document.documentElement;
   root.dataset.theme = resolved;
-  root.style.colorScheme = resolved;
+  root.style.colorScheme = resolved === "retro" ? "dark" : resolved;
+  document.body.classList.toggle("retro-scanlines", resolved === "retro");
 }
 
 export function attachThemeListener(host: SettingsHost) {

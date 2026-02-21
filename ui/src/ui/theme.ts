@@ -1,5 +1,5 @@
-export type ThemeMode = "system" | "light" | "dark";
-export type ResolvedTheme = "light" | "dark";
+export type ThemeMode = "system" | "light" | "dark" | "retro";
+export type ResolvedTheme = "light" | "dark" | "retro";
 
 export function getSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {

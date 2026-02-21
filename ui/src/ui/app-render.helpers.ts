@@ -394,7 +394,7 @@ function resolveSessionOptions(
   return options;
 }
 
-const THEME_ORDER: ThemeMode[] = ["system", "light", "dark"];
+const THEME_ORDER: ThemeMode[] = ["system", "light", "dark", "retro"];
 
 export function renderThemeToggle(state: AppViewState) {
   const index = Math.max(0, THEME_ORDER.indexOf(state.theme));
@@ -439,6 +439,15 @@ export function renderThemeToggle(state: AppViewState) {
         >
           ${renderMoonIcon()}
         </button>
+        <button
+          class="theme-toggle__button ${state.theme === "retro" ? "active" : ""}"
+          @click=${applyTheme("retro")}
+          aria-pressed=${state.theme === "retro"}
+          aria-label="Retro (terminal) theme"
+          title="Retro"
+        >
+          ${renderTerminalIcon()}
+        </button>
       </div>
     </div>
   `;
@@ -476,6 +485,40 @@ function renderMonitorIcon() {
       <rect width="20" height="14" x="2" y="3" rx="2"></rect>
       <line x1="8" x2="16" y1="21" y2="21"></line>
       <line x1="12" x2="12" y1="17" y2="21"></line>
+    </svg>
+  `;
+}
+
+function renderTerminalIcon() {
+  return html`
+    <svg class="theme-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect
+        width="20"
+        height="16"
+        x="2"
+        y="4"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        rx="0"
+      ></rect>
+      <polyline
+        points="6 9 10 13 6 17"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      ></polyline>
+      <line
+        x1="14"
+        y1="17"
+        x2="22"
+        y2="17"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      ></line>
     </svg>
   `;
 }
